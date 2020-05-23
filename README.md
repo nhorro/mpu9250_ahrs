@@ -14,3 +14,5 @@ Project organization:
 	doc						MPU9250 datasheet and other references.
 	python					Simple script to save CSVs.
 ~~
+
+[Detailed description of the algorithm implementation](notebooks/01%20-%20BasicAHRS.ipynb)
