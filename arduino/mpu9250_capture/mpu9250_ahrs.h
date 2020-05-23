@@ -12,9 +12,6 @@
 #define DEBUG_PRINT_MAGACC_EULER  0x01
 #define DEBUG_PRINT_GYRO_EULER    0x02
 
-static constexpr double G_EARTH = 9.80665; // m/s2
-static constexpr const char* CSV_SEP = ",";
-
 class mpu9250 {
 public:
     mpu9250();
@@ -28,7 +25,7 @@ public:
     /**
      Set magnetometer bias correction
      */
-    void set_mag_bias_correction(int16_t x, int16_t y, int16_t z);
+    void set_mag_bias_correction(float x, float y, float z);
 
     /**
       Read from MPU9250.
@@ -54,10 +51,10 @@ public:
      */
     void integrate_gyro_angles(uint32_t t);
 
-    int16_t* get_raw_values()           const { return this->raw_values; }
-    float*   get_processed_values()     const { return this->processed_values; }
-    float*   get_magacc_euler_angles()  const { return this->euler_angles_magacc; }
-    float*   get_gyro_euler_angles()    const { return this->euler_angles_gyro; }
+    const int16_t* get_raw_values()           const { return this->raw_values; }
+    const float*   get_processed_values()     const { return this->processed_values; }
+    const float*   get_magacc_euler_angles()  const { return this->euler_angles_magacc; }
+    const float*   get_gyro_euler_angles()    const { return this->euler_angles_gyro; }
 
     // Data
     enum imu_value_e{
@@ -91,9 +88,7 @@ private:
     bool mag_valid; // last reading was valid (mag)
     
     // Magnetometer :: Calibration
-    int32_t mag_max[3];   // mag_max{-32767, -32767, -32767}
-    int32_t mag_min[3];   // mag_min{32767, 32767, 32767}    
-    int16_t mag_bias_correction[3];
+    float mag_bias_correction[3];
 };
 
 #endif // MPU9250_AHRS_H

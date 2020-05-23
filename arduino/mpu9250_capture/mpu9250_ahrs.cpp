@@ -14,7 +14,8 @@
 #define    ACC_FULL_SCALE_8_G        0x10
 #define    ACC_FULL_SCALE_16_G       0x18
 
-
+static constexpr double G_EARTH = 9.80665; // mm/s2
+static constexpr const char* CSV_SEP = ",";
 
 // This function read Nbytes bytes from I2C device at address Address. 
 // Put read bytes starting at register Register in the Data array. 
@@ -48,11 +49,9 @@ void i2c_write_byte(uint8_t Address, uint8_t Register, uint8_t Data)
 
 mpu9250::mpu9250()
     :
-        mag_max({-32767, -32767, -32767})
-      , mag_min({32767, 32767, 32767})
-      , mag_bias_correction({0,0,0})
-
-      , gyro_angles({0,0,0})
+        mag_bias_correction({0,0,0})
+      , euler_angles_gyro({0,0,0})   // roll, pitch, yaw (radians)
+      , euler_angles_magacc({0,0,0}) // roll, pitch, yaw (radians)
       , last_gyro_update(millis())
 {
   
@@ -93,7 +92,7 @@ int8_t mpu9250::setup()
 
          /* Magnetometer configuration */   
          // Request continuous magnetometer measurements in 16 bits
-         i2c_write_byte(MAG_ADDRESS,0x0A,0x16);  
+         i2c_write_byte(MAG_ADDRESS,0x0A,0x16);           
     }
     else
     {
@@ -105,7 +104,7 @@ int8_t mpu9250::setup()
 
 
 
-void mpu9250::set_mag_bias_correction(int16_t x, int16_t y, int16_t z)
+void mpu9250::set_mag_bias_correction(float x, float y, float z)
 {
     this->mag_bias_correction[0] = x;
     this->mag_bias_correction[1] = y;
@@ -153,26 +152,38 @@ void mpu9250::read()
 void mpu9250::transform_units()
 {
   // Accelerometer
-  this->processed_values[acc_x] = this->raw_values[acc_x] / (2.0 * G_EARTH);
-  this->processed_values[acc_y] = this->raw_values[acc_y] / (2.0 * G_EARTH);
-  this->processed_values[acc_z] = this->raw_values[acc_z] / (2.0 * G_EARTH);
-
+  this->processed_values[acc_x] = this->raw_values[acc_x] * (2.0*G_EARTH)/ 32768.0;
+  this->processed_values[acc_y] = this->raw_values[acc_y] * (2.0*G_EARTH)/ 32768.0;
+  this->processed_values[acc_z] = this->raw_values[acc_z] * (2.0*G_EARTH)/ 32768.0;
+  
   // Gyro
-  this->processed_values[gyro_x] = this->raw_values[gyro_x] / 131.0;
-  this->processed_values[gyro_y] = this->raw_values[gyro_y] / 131.0;
-  this->processed_values[gyro_z] = this->raw_values[gyro_z] / 131.0;
+  this->processed_values[gyro_x] = this->raw_values[gyro_x] / 131.0 * 0.0174533;
+  this->processed_values[gyro_y] = this->raw_values[gyro_y] / 131.0 * 0.0174533;
+  this->processed_values[gyro_z] = this->raw_values[gyro_z] / 131.0 * 0.0174533;
 
   // Mag  
-  this->processed_values[mag_x] = this->raw_values[mag_x]* (4912.0/32760.0) * 10.0 + this->mag_bias_correction[0];
-  this->processed_values[mag_y] = this->raw_values[mag_y]* (4912.0/32760.0) * 10.0 + this->mag_bias_correction[1];
-  this->processed_values[mag_z] = this->raw_values[mag_z]* (4912.0/32760.0) * 10.0 + this->mag_bias_correction[2];
+  this->processed_values[mag_x] = this->raw_values[mag_x]* (4912.0/32760.0) - this->mag_bias_correction[0];
+  this->processed_values[mag_y] = this->raw_values[mag_y]* (4912.0/32760.0) - this->mag_bias_correction[1];
+  this->processed_values[mag_z] = this->raw_values[mag_z]* (4912.0/32760.0) - this->mag_bias_correction[2];
 }
 
 
 
 void mpu9250::calc_euler_angles_from_accmag()
 {  
-  // TODO
+    float ax = constrain(this->processed_values[acc_x], -G_EARTH, G_EARTH);
+    float ay = constrain(this->processed_values[acc_y], -G_EARTH, G_EARTH);
+    float az = constrain(this->processed_values[acc_z], -G_EARTH, G_EARTH);
+    
+    this->euler_angles_magacc[pitch] = asin(-ax/-G_EARTH);
+    this->euler_angles_magacc[roll] = atan2(ay,az);
+
+    const float B = 25640.0/1000.0; // uT
+    const float I = 41.0 * 0.0174533;
+    float tmp1 = cos(this->euler_angles_magacc[pitch]) * this->processed_values[mag_z] * sin(this->euler_angles_magacc[roll])
+                -  this->processed_values[mag_y] * cos(this->euler_angles_magacc[roll]);
+    float tmp2 = this->processed_values[mag_x] + B * sin(I)*sin(this->euler_angles_magacc[roll]);
+    this->euler_angles_magacc[yaw] = atan2(tmp1,tmp2);
 }
 
 
@@ -180,9 +191,19 @@ void mpu9250::calc_euler_angles_from_accmag()
 void mpu9250::integrate_gyro_angles(uint32_t t)
 {
     uint32_t dt = this->last_gyro_update > t ? 1 + this->last_gyro_update + ~t : t - this->last_gyro_update;
-    this->gyro_angles[0] += (this->raw_values[gyro_x] / 131.0)*dt/1000;
-    this->gyro_angles[1] += (this->raw_values[gyro_y] / 131.0)*dt/1000;
-    this->gyro_angles[2] += (this->raw_values[gyro_z] / 131.0)*dt/1000;
+    
+    this->euler_angles_gyro[pitch] += this->processed_values[gyro_x]*dt/1000;
+    if(this->euler_angles_gyro[pitch]  > PI) this->euler_angles_gyro[pitch]-=PI;
+    if(this->euler_angles_gyro[pitch] <- PI) this->euler_angles_gyro[pitch]+=PI;
+    
+    this->euler_angles_gyro[roll] += this->processed_values[gyro_y]*dt/1000;
+    if(this->euler_angles_gyro[roll]  > PI) this->euler_angles_gyro[roll]-=PI;
+    if(this->euler_angles_gyro[roll] <- PI) this->euler_angles_gyro[roll]+=PI;
+    
+    this->euler_angles_gyro[yaw] += this->processed_values[gyro_z]*dt/1000;
+    if(this->euler_angles_gyro[yaw]  > PI) this->euler_angles_gyro[yaw]-=PI;
+    if(this->euler_angles_gyro[yaw] <- PI) this->euler_angles_gyro[yaw]+=PI;
+    
     this->last_gyro_update = t;
 }
 
@@ -190,10 +211,7 @@ void mpu9250::integrate_gyro_angles(uint32_t t)
 // DEBUG
 
 void mpu9250::debug_print_raw_values(int flags)
-{  
-   Serial.print (millis()); 
-   Serial.print (CSV_SEP);
-    
+{   
   // Accelerometer
   if (flags & DEBUG_PRINT_FLAGS_ACC)
   {
@@ -274,22 +292,22 @@ void mpu9250::debug_print_processed_values(int flags)
 void mpu9250::debug_print_euler_angles(int flags)
 {    
     if (flags & DEBUG_PRINT_MAGACC_EULER)
-    {    
-        Serial.print(this->euler_angles_magacc[0]);
+    {   
+        Serial.print( constrain(this->euler_angles_magacc[pitch]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
-        Serial.print(this->euler_angles_magacc[1]);
+        Serial.print( constrain(this->euler_angles_magacc[roll]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
-        Serial.print(this->euler_angles_magacc[2]);
+        Serial.print( constrain(this->euler_angles_magacc[yaw]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
     }
 
     if (flags & DEBUG_PRINT_GYRO_EULER)
-    {    
-        Serial.print(this->euler_angles_gyro[0]);
+    {   
+        Serial.print( constrain(this->euler_angles_gyro[pitch]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
-        Serial.print(this->euler_angles_gyro[1]);
+        Serial.print( constrain(this->euler_angles_gyro[roll]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
-        Serial.print(this->euler_angles_gyro[2]);
+        Serial.print( constrain(this->euler_angles_gyro[yaw]*57.2958,-180.0,180.0),DEC);
         Serial.print (CSV_SEP);  
     }    
 }
