@@ -88,7 +88,6 @@ void loop()
       //imu.debug_print_processed_values( DEBUG_PRINT_FLAGS_ACC  | DEBUG_PRINT_FLAGS_GYRO | DEBUG_PRINT_FLAGS_MAG );        
       //imu.debug_print_euler_angles(DEBUG_PRINT_MAGACC_EULER);
       imu.debug_print_euler_angles(DEBUG_PRINT_GYRO_EULER);
-      //Serial.print("Hola");
       Serial.println();
     }
 }
