@@ -1,6 +1,6 @@
 # AHRS MPU9250 library
 
-Arduino code and jupyter notebooks of AHRS with MPU9250.
+Arduino code and jupyter notebooks for AHRS with MPU9250.
 
 Project organization:
 
